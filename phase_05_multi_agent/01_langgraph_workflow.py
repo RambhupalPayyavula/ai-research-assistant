@@ -57,55 +57,63 @@ CONTEXT:
     return {**state, "draft_answer": draft}
 
 
-# ── Node 3: Fact-checker — a SEPARATE, adversarial pass ──────────────────
+# ── Node 3: Summarizer — runs BEFORE fact-check, so fact-check verifies the polished output──────────────────
+def summarize_node(state: AgentState) -> AgentState:
+    system = """You are an editor. Rewrite the following answer to be clear,
+    concise, plain prose (no markdown headers or bold), with citations like [Source N].
+    You may ONLY use facts already present in the answer below — the source chunks
+    are provided ONLY so you can determine correct [Source N] numbering. Do NOT
+    add any fact, number, or claim that isn't already in the answer you're editing."""
+    context = "\n---\n".join(state["retrieved_chunks"])
+    user_msg = f"Source chunks:\n{context}\n\nAnswer to clean up:\n{state['draft_answer']}"
+    final = llm.simple(system=system, user_message=user_msg, temperature=0.0)
+    console.print(f"  [purple]summarize_node:[/purple] finalized with citation cleanup")
+    return {**state, "final_answer": final}
+
+# ── Node 4:   Fact-checker — a SEPARATE, adversarial pass ───
 def fact_check_node(state: AgentState) -> AgentState:
     context = "\n---\n".join(state["retrieved_chunks"])
     system = f"""You are a skeptical fact-checker. Verify whether EVERY claim in the
-draft answer is directly supported by the source context below. Be strict.
+    answer below is directly supported by the source context. Be strict.
 
-SOURCE CONTEXT:
-{context}
+    SOURCE CONTEXT:
+    {context}
 
-DRAFT ANSWER:
-{state['draft_answer']}
+    ANSWER TO VERIFY:
+    {state['final_answer']}
 
-Respond with exactly one line: "PASS" if every claim is supported, or "FAIL: <reason>" if not."""
-    result = llm.simple(system=system, user_message="Verify the draft answer.", temperature=0.0)
+    Respond with exactly one line: "PASS" if every claim is supported, or "FAIL: <reason>" if not."""
+    result = llm.simple(system=system, user_message="Verify the answer.", temperature=0.0)
     passed = result.strip().upper().startswith("PASS")
     console.print(f"  [blue]fact_check_node:[/blue] {'PASS' if passed else 'FAIL'} \u2014 {result[:80]}")
     return {**state, "fact_check_passed": passed, "fact_check_notes": result}
 
 
-# ── Node 4: Summarizer — only runs once fact-check passes ────────────────
-def summarize_node(state: AgentState) -> AgentState:
-    console.print(f"  [purple]summarize_node:[/purple] finalizing")
-    return {**state, "final_answer": state["draft_answer"]}
-
-
 # ── Conditional edge: did fact-checking pass, and have we retried too much? ─
 def route_after_fact_check(state: AgentState) -> str:
     if state["fact_check_passed"]:
-        return "summarize"
+        return "end"
     if state["retrieval_attempts"] >= 2:
-        return "summarize"  # give up gracefully rather than loop forever
+        return "end"
     return "retrieve"
+
 
 
 # ── Build the graph ─────────────────────────────────────────────────────
 graph = StateGraph(AgentState)
 graph.add_node("retrieve", retrieve_node)
 graph.add_node("draft", draft_node)
-graph.add_node("fact_check", fact_check_node)
 graph.add_node("summarize", summarize_node)
+graph.add_node("fact_check", fact_check_node)
 
 graph.set_entry_point("retrieve")
 graph.add_edge("retrieve", "draft")
-graph.add_edge("draft", "fact_check")
+graph.add_edge("draft", "summarize")
+graph.add_edge("summarize", "fact_check")          
 graph.add_conditional_edges("fact_check", route_after_fact_check, {
     "retrieve": "retrieve",
-    "summarize": "summarize",
+    "end": END,
 })
-graph.add_edge("summarize", END)
 
 app = graph.compile()
 
