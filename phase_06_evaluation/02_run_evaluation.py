@@ -51,20 +51,35 @@ CONTEXT:
 {context}"""
     return llm.simple(system=system, user_message=question, temperature=0.0)
 
-
+def parse_judge_json(raw: str) -> dict:
+    """Try direct parse first, then strip common markdown wrapping as a fallback."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    # Strip markdown code fences if present
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[1]
+        cleaned = cleaned.replace("json", "", 1).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {"score": None, "reason": f"judge output not parseable even after cleanup: {raw[:100]}"}
+    
 def judge_faithfulness(answer: str, chunks: list[str]) -> dict:
-    """LLM-as-judge: is every claim in the answer supported by the context?"""
     context = "\n---\n".join(chunks)
     system = """You are an evaluation judge. Score the answer's faithfulness to the context
-on a scale of 0.0 to 1.0, where 1.0 means every claim is fully supported and
-0.0 means the answer is entirely unsupported/hallucinated. Respond ONLY as JSON:
-{"score": <float>, "reason": "<one sentence>"}"""
+    on a scale of 0.0 to 1.0, where 1.0 means every claim is fully supported and
+    0.0 means the answer is entirely unsupported/hallucinated.
+
+    Respond with ONLY raw JSON, nothing else — no markdown code fences, no ```json
+    tags, no explanation before or after. Your entire response must be parseable
+    by json.loads() with no modification. Example of correct output:
+    {"score": 0.9, "reason": "one sentence"}"""
     user_msg = f"CONTEXT:\n{context}\n\nANSWER:\n{answer}"
     result = llm.simple(system=system, user_message=user_msg, temperature=0.0)
-    try:
-        return json.loads(result)
-    except json.JSONDecodeError:
-        return {"score": None, "reason": f"judge output not parseable: {result[:100]}"}
+    return parse_judge_json(result)
 
 
 def is_refusal(answer: str) -> bool:
