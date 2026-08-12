@@ -103,7 +103,7 @@ def run_evaluation():
             "refused": refused,
             "refusal_correct": refusal_correct,
             "faithfulness_score": faithfulness.get("score"),
-            "answer": answer[:80],
+            "answer": answer,
         })
     return results
 
@@ -118,7 +118,7 @@ def print_report(results):
     for r in results:
         refusal_mark = "[green]YES[/green]" if r["refusal_correct"] else "[red]NO[/red]"
         faith = f"{r['faithfulness_score']:.2f}" if r["faithfulness_score"] is not None else "N/A"
-        table.add_row(r["question"][:40], refusal_mark, faith, r["answer"])
+        table.add_row(r["question"][:40], refusal_mark, faith, r["answer"][:40])
 
     console.print(table)
 
