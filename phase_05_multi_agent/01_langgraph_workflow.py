@@ -39,10 +39,13 @@ class AgentState(TypedDict):
 
 
 # ── Node 1: Retriever ─────────────────────────────────────────────────────
-def retrieve_node(state: AgentState) -> AgentState:
+def retrieve_node(state: AgentState, min_relevance: float = 0.25) -> AgentState:
     results = collection.query(query_texts=[state["question"]], n_results=5)
-    chunks = results["documents"][0]
-    console.print(f"  [teal]retrieve_node:[/teal] found {len(chunks)} chunks")
+    chunks = [
+        doc for doc, dist in zip(results["documents"][0], results["distances"][0])
+        if (1 - dist) >= min_relevance
+    ]
+    console.print(f"  [teal]retrieve_node:[/teal] found {len(chunks)} chunks above relevance threshold")
     return {**state, "retrieved_chunks": chunks, "retrieval_attempts": state.get("retrieval_attempts", 0) + 1}
 
 
