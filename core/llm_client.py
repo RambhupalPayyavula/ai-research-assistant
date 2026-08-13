@@ -68,6 +68,12 @@ class LLMClient:
     """
 
     def __init__(self, model: str = "claude-sonnet-4-5"):
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key or not api_key.startswith("sk-ant-"):
+            raise ValueError(
+                "ANTHROPIC_API_KEY is missing or malformed. Check .env has exactly "
+                "one key per line (run `wc -l .env` — should match your key count)."
+            )
         self.client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         self.model = model
         self.total_cost_usd = 0.0

@@ -16,3 +16,6 @@ langchain
 langchain-pinecone
 langchain-huggingface
 pinecone
+fastapi
+uvicorn
+python-multipart

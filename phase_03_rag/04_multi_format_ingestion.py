@@ -21,39 +21,12 @@ from rich.console import Console
 from rich.progress import track
 from rich.table import Table
 
+from core.document_loader import (
+    Chunk, recursive_chunk, load_document, validate_file,
+    SUPPORTED_EXTENSIONS, MAX_FILE_SIZE_MB,
+)
+
 console = Console()
-
-MAX_FILE_SIZE_MB = 20
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
-
-
-# ── Chunking (same as script 03) ─────────────────────────────────────────
-@dataclass
-class Chunk:
-    text: str
-    source: str
-    chunk_index: int
-
-
-def split_into_sentences(text: str) -> list[str]:
-    text = re.sub(r"\s+", " ", text).strip()
-    return [s for s in re.split(r"(?<=[.!?])\s+", text) if s]
-
-
-def recursive_chunk(text: str, source: str, max_chars: int = 800, overlap_sentences: int = 1) -> list[Chunk]:
-    sentences = split_into_sentences(text)
-    chunks, current, current_len = [], [], 0
-    for sentence in sentences:
-        if current_len + len(sentence) > max_chars and current:
-            chunks.append(Chunk(" ".join(current), source, len(chunks)))
-            current = current[-overlap_sentences:] if overlap_sentences else []
-            current_len = sum(len(s) for s in current)
-        current.append(sentence)
-        current_len += len(sentence)
-    if current:
-        chunks.append(Chunk(" ".join(current), source, len(chunks)))
-    return chunks
-
 
 # ── Format-specific text extractors — each returns plain text, nothing else ──
 def load_pdf(path: Path) -> str:
@@ -87,24 +60,6 @@ LOADERS = {
     ".txt": load_txt,
     ".md": load_md,
 }
-
-
-def load_document(path: Path) -> str:
-    """Dispatches to the right extractor based on file extension."""
-    ext = path.suffix.lower()
-    if ext not in LOADERS:
-        raise ValueError(f"Unsupported format: {ext}")
-    return LOADERS[ext](path)
-
-
-def validate_file(path: Path) -> tuple[bool, str]:
-    """Basic safety checks before attempting to parse."""
-    if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-        return False, f"Unsupported extension: {path.suffix}"
-    size_mb = path.stat().st_size / (1024 * 1024)
-    if size_mb > MAX_FILE_SIZE_MB:
-        return False, f"File too large: {size_mb:.1f}MB (max {MAX_FILE_SIZE_MB}MB)"
-    return True, "OK"
 
 
 # ── The unified ingestion pipeline ────────────────────────────────────────
