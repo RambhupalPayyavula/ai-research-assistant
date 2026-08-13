@@ -1,4 +1,4 @@
-# ── Base image ──────────────────────────────────────────────────────────
+#── Base image ──────────────────────────────────────────────────────────
 # slim, not alpine: alpine's musl libc frequently breaks compiled Python
 # packages (numpy, torch) in ways that cost more debugging time than the
 # smaller image size saves. slim is the standard, pragmatic choice for
@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY core/ ./core/
 COPY phase_07_production/ ./phase_07_production/
 COPY sample_documents/ ./sample_documents/
+COPY phase_07_production/static/ ./phase_07_production/static/
 
 # ── Runtime configuration ────────────────────────────────────────────────
 # Render/Railway/Fly all inject a PORT environment variable at runtime and

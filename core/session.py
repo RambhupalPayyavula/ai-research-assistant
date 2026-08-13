@@ -22,8 +22,9 @@ MAX_QUERIES_PER_SESSION = 30
 class SessionUsage:
     query_count: int = 0
     request_timestamps: list = field(default_factory=list)
+    total_bytes_uploaded: int = 0
 
-
+MAX_SESSION_UPLOAD_MB = 50
 _usage_store: dict[str, SessionUsage] = {}
 
 
@@ -59,3 +60,15 @@ def record_query(session_id: str):
 
 def clear_session_usage(session_id: str):
     _usage_store.pop(session_id, None)
+
+def check_upload_limit(session_id: str, new_file_size_bytes: int) -> tuple[bool, str]:
+    """Checks whether adding this file would exceed the session's cumulative upload cap."""
+    usage = get_usage(session_id)
+    projected_mb = (usage.total_bytes_uploaded + new_file_size_bytes) / (1024 * 1024)
+    if projected_mb > MAX_SESSION_UPLOAD_MB:
+        used_mb = usage.total_bytes_uploaded / (1024 * 1024)
+        return False, f"Session upload limit reached: {used_mb:.1f}MB used, {MAX_SESSION_UPLOAD_MB}MB max. Clear session to continue."
+    return True, ""
+
+def record_upload(session_id: str, file_size_bytes: int):
+    get_usage(session_id).total_bytes_uploaded += file_size_bytes

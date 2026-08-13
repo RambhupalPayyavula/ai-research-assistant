@@ -26,6 +26,9 @@ from core.prompts import build_grounded_prompt
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from core.vector_store import warm_embedding_cache
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from core.session import check_upload_limit, record_upload
 from core.session import (
     SESSION_COOKIE_NAME, new_session_id, check_rate_limit,
     record_query, clear_session_usage,
@@ -44,7 +47,10 @@ app = FastAPI(title="AI Research Assistant API", version="1.0", lifespan=lifespa
 # Restrict allow_origins to your actual site domain before final deployment.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: restrict to https://rambhupalpayyavula.com before going live
+    allow_origins=[
+        "https://rambhupalpayyavula.com",
+        "http://localhost:4321",  # Astro's local dev server, for testing the site against this API locally
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,11 +84,16 @@ class UploadResponse(BaseModel):
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────
+@app.get("/")
+def serve_ui():
+    static_dir = Path(__file__).resolve().parent / "static"
+    return FileResponse(static_dir / "index.html")
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-
+@app.post("/upload", response_model=UploadResponse)
 @app.post("/upload", response_model=UploadResponse)
 async def upload_document(request: Request, response: Response, file: UploadFile = File(...)):
     session_id = get_or_create_session(request, response)
@@ -92,16 +103,18 @@ async def upload_document(request: Request, response: Response, file: UploadFile
         tmp_path = PathLib(tmp.name)
 
     try:
-        # ok, reason = 
-        # validate_file(tmp_path.with_name(file.filename))  # validate against the ORIGINAL filename/ext
-        # validate_file checks size on disk — re-check size on the actual temp file:
         size_mb = tmp_path.stat().st_size / (1024 * 1024)
         if size_mb > 20:
-            raise HTTPException(413, f"File too large: {size_mb:.1f}MB (max 20MB)")
+            raise HTTPException(413, f"File too large: {size_mb:.1f}MB (max 20MB per file)")
+
+        # NEW — cumulative session check
+        allowed, reason = check_upload_limit(session_id, tmp_path.stat().st_size)
+        if not allowed:
+            raise HTTPException(413, reason)
+
         if PathLib(file.filename).suffix.lower() not in {".pdf", ".docx", ".txt", ".md"}:
             raise HTTPException(400, f"Unsupported file type: {PathLib(file.filename).suffix}")
 
-        # Rename temp file to preserve the real extension for the loader dispatch
         real_path = tmp_path.with_suffix(PathLib(file.filename).suffix)
         tmp_path.rename(real_path)
 
@@ -117,11 +130,12 @@ async def upload_document(request: Request, response: Response, file: UploadFile
             metadatas=[{"source": c.source, "chunk_index": c.chunk_index} for c in chunks],
         )
 
+        record_upload(session_id, real_path.stat().st_size)  # NEW
+
         return UploadResponse(filename=file.filename, chunks_ingested=len(chunks), status="ok")
 
     finally:
         real_path.unlink(missing_ok=True) if 'real_path' in dir() else tmp_path.unlink(missing_ok=True)
-
 
 @app.post("/ask", response_model=AskResponse)
 def ask_question(payload: AskRequest, request: Request, response: Response):
@@ -146,7 +160,6 @@ def ask_question(payload: AskRequest, request: Request, response: Response):
         sources=[f"{c.source} (relevance: {c.relevance_score:.2f})" for c in retrieved],
     )
 
-
 @app.post("/clear")
 def clear_session(request: Request, response: Response):
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
@@ -158,9 +171,3 @@ def clear_session(request: Request, response: Response):
     clear_session_usage(session_id)
     response.delete_cookie(SESSION_COOKIE_NAME)
     return {"status": "session cleared"}
-
-# TODO: remove before deploying
-@app.exception_handler(Exception)
-async def debug_exception_handler(request: Request, exc: Exception):
-    import traceback
-    return JSONResponse(status_code=500, content={"detail": str(exc), "traceback": traceback.format_exc()})

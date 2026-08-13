@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Research Assistant</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 20px;
+    background: #fafafa;
+    color: #1a1a1a;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .subtitle { color: #666; margin-bottom: 32px; font-size: 0.95rem; }
+  .card {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 1rem; margin-top: 0; margin-bottom: 12px; }
+  input[type="file"] { margin-bottom: 12px; display: block; }
+  input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    margin-bottom: 10px;
+  }
+  button {
+    background: #1a1a1a;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button:hover { background: #333; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  button.secondary { background: transparent; color: #666; border: 1px solid #ccc; }
+  .status { font-size: 0.85rem; color: #666; margin-top: 8px; min-height: 20px; }
+  .status.error { color: #b00020; }
+  .status.success { color: #0a7d3c; }
+  .answer-box {
+    background: #f4f3fc;
+    border: 1px solid #d8d5f5;
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 16px;
+    display: none;
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+  .sources {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: #555;
+  }
+  .uploaded-files { margin-top: 10px; font-size: 0.85rem; }
+  .uploaded-files span {
+    display: inline-block;
+    background: #eee;
+    border-radius: 4px;
+    padding: 3px 8px;
+    margin: 2px 4px 2px 0;
+  }
+  footer { text-align: center; margin-top: 40px; font-size: 0.8rem; color: #999; }
+  footer a { color: #666; }
+</style>
+</head>
+<body>
+
+<h1>AI Research Assistant</h1>
+<p class="subtitle">Upload a document, then ask questions about it. Answers are grounded only in what you upload — nothing is made up.</p>
+<p style="font-size:0.78rem; color:#888; margin: 4px 0 12px 0;">
+  PDF, DOCX, TXT, or Markdown — max 20MB per file, 50MB total per session
+</p>
+
+<div class="card">
+  <h2>1. Upload a document</h2>
+  <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.md">
+  <p style="font-size:0.78rem; color:#888; margin: 4px 0 12px 0;">
+    PDF, DOCX, TXT, or Markdown — max 20MB per file
+  </p>
+  <button onclick="uploadFile()" id="uploadBtn">Upload</button>
+  <div class="status" id="uploadStatus"></div>
+  <div class="uploaded-files" id="uploadedFiles"></div>
+</div>
+
+<div class="card">
+  <h2>2. Ask a question</h2>
+  <input type="text" id="questionInput" placeholder="e.g. What was the revenue and how did it change?" onkeydown="if(event.key==='Enter') askQuestion()">
+  <button onclick="askQuestion()" id="askBtn">Ask</button>
+  <div class="status" id="askStatus"></div>
+  <div class="answer-box" id="answerBox">
+    <div id="answerText"></div>
+    <div class="sources" id="sourcesText"></div>
+  </div>
+</div>
+
+<button class="secondary" onclick="clearSession()">Clear my documents</button>
+
+<footer>
+  Built with Claude, LangChain, Pinecone, and FastAPI &middot;
+  <a href="https://github.com/RambhupalPayyavula/ai-research-assistant" target="_blank">View source on GitHub</a>
+</footer>
+
+<script>
+  const uploadedNames = [];
+  const MAX_FILE_SIZE_MB = 20;
+
+async function uploadFile() {
+  const fileInput = document.getElementById('fileInput');
+  const status = document.getElementById('uploadStatus');
+  const btn = document.getElementById('uploadBtn');
+
+  if (!fileInput.files.length) {
+    status.textContent = "Choose a file first.";
+    status.className = "status error";
+    return;
+  }
+
+  const file = fileInput.files[0];
+  const sizeMb = file.size / (1024 * 1024);
+
+  if (sizeMb > MAX_FILE_SIZE_MB) {
+    status.textContent = `File too large: ${sizeMb.toFixed(1)}MB (max ${MAX_FILE_SIZE_MB}MB)`;
+    status.className = "status error";
+    return;   // stops here — never even attempts the upload
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  btn.disabled = true;
+  status.textContent = "Uploading and processing... (first request may take a moment)";
+  status.className = "status";
+
+  try {
+    const res = await fetch("/upload", { method: "POST", body: formData, credentials: "include" });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.detail || "Upload failed");
+
+    status.textContent = `Done — ${data.chunks_ingested} chunks indexed.`;
+    status.className = "status success";
+    uploadedNames.push(data.filename);
+    document.getElementById('uploadedFiles').innerHTML =
+      uploadedNames.map(n => `<span>${n}</span>`).join("");
+    fileInput.value = "";
+  } catch (err) {
+    status.textContent = "Error: " + err.message;
+    status.className = "status error";
+  } finally {
+    btn.disabled = false;
+  }
+}
+  async function askQuestion() {
+    const input = document.getElementById('questionInput');
+    const status = document.getElementById('askStatus');
+    const btn = document.getElementById('askBtn');
+    const answerBox = document.getElementById('answerBox');
+
+    if (!input.value.trim()) return;
+
+    btn.disabled = true;
+    status.textContent = "Thinking...";
+    status.className = "status";
+    answerBox.style.display = "none";
+
+    try {
+      const res = await fetch("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ question: input.value }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.detail || "Request failed");
+
+      document.getElementById('answerText').textContent = data.answer;
+      const citedNumbers = extractCitedSourceNumbers(data.answer);
+        const citedSources = citedNumbers.map(n => data.sources[n - 1]).filter(Boolean);
+
+      const sourcesHtml = citedSources.length
+        ? `Sources: ` + citedSources.map((s, i) => {
+            const filename = escapeHtml(s.split(" (relevance:")[0]);
+            return `[${citedNumbers[i]}] ${filename}`;
+            }).join("&nbsp;&nbsp;")
+            + `<br><a href="#" onclick="toggleDetails(event)" style="font-size:0.78rem;color:#888;">Show all retrieved chunks (${data.sources.length})</a>`
+            + `<div id="retrievalDetails" style="display:none; margin-top:6px; font-family:monospace; font-size:0.78rem; color:#777;">`
+            + data.sources.map((s, i) => `[${i + 1}] ${escapeHtml(s)}`).join("<br>")
+            + `</div>`
+        : "";
+        document.getElementById('sourcesText').innerHTML = sourcesHtml;
+      answerBox.style.display = "block";
+      status.textContent = "";
+    } catch (err) {
+      status.textContent = "Error: " + err.message;
+      status.className = "status error";
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function clearSession() {
+    await fetch("/clear", { method: "POST", credentials: "include" });
+    uploadedNames.length = 0;
+    document.getElementById('uploadedFiles').innerHTML = "";
+    document.getElementById('answerBox').style.display = "none";
+    document.getElementById('uploadStatus').textContent = "Session cleared.";
+    document.getElementById('uploadStatus').className = "status success";
+  }
+
+  function toggleDetails(e) {
+    e.preventDefault();
+    const el = document.getElementById('retrievalDetails');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function extractCitedSourceNumbers(answerText) {
+    const matches = [...answerText.matchAll(/\[(\d+)\]/g)];   // was /\[Source (\d+)\]/g
+    return [...new Set(matches.map(m => parseInt(m[1], 10)))];
+    }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+</script>
+</body>
+</html>

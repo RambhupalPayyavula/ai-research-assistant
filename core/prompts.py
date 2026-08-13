@@ -17,7 +17,7 @@ RULES (follow these exactly):
 1. Answer using ONLY the CONTEXT below — never use outside knowledge.
 2. If the context does not contain the answer, respond EXACTLY with:
    "This information is not available in the provided documents."
-3. When you answer, cite which source the information came from using [Source N].
+3. When you answer, cite which source the information came from using a bracketed number, e.g. [1], [2] — NOT the word "Source". Just the number in brackets.
 4. Do not speculate, infer beyond what is stated, or hedge unnecessarily.
 5. Keep answers concise and directly responsive to the question.
 
@@ -43,7 +43,7 @@ def build_grounded_prompt(chunks: list[RetrievedChunk]) -> str:
     """
     formatted = []
     for i, chunk in enumerate(chunks, start=1):
-        formatted.append(f"[Source {i}] ({chunk.source})\n{chunk.text}")
+        formatted.append(f"[{i}] ({chunk.source})\n{chunk.text}") 
     context_block = "\n\n---\n\n".join(formatted)
     return GROUNDED_ANSWER_SYSTEM.format(context=context_block)
 
