@@ -5,3 +5,4 @@ __pycache__/
 chroma_db/
 eval_results.json
 ragas_eval_results.csv
+documents/

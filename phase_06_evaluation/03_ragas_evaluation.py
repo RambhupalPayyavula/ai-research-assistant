@@ -84,7 +84,7 @@ if __name__ == "__main__":
     dataset,
     metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
     llm=judge_llm,
-    embeddings=ragas_embeddings,   # <-- new: same local model as Phases 2-5, no OpenAI needed
+    embeddings=ragas_embeddings,   
 )
 
     console.print("\n[bold]RAGAS Evaluation Results:[/bold]")

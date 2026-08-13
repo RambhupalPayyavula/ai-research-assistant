@@ -75,19 +75,20 @@ FORMAT RULES:
 def run_agent(user_message: str, max_steps: int = 4):
     messages = [{"role": "user", "content": user_message}]
     source_counter = {"n": 0}  # shared across all searches in this conversation
-
-    def search_documents_numbered(query: str, top_k: int = 5) -> str:
+    def search_documents_numbered(query: str, top_k: int = 5, min_relevance: float = 0.25) -> str:
         results = collection.query(query_texts=[query], n_results=top_k)
         docs = results["documents"][0]
         metas = results["metadatas"][0]
-        if not docs:
-            return "No relevant documents found."
+        dists = results["distances"][0]
+        
         formatted = []
-        for doc, meta in zip(docs, metas):
+        for doc, meta, dist in zip(docs, metas, dists):
+            if (1 - dist) < min_relevance:
+                continue
             source_counter["n"] += 1
             source = meta.get("source", "unknown")
             formatted.append(f"[Source {source_counter['n']}] ({source})\n{doc}")
-        return "\n\n---\n\n".join(formatted)
+        return "\n\n---\n\n".join(formatted) if formatted else "No sufficiently relevant documents found."
 
     for step in range(max_steps):
         response = llm.client.messages.create(

@@ -32,16 +32,27 @@ collection = client.get_or_create_collection(
 llm = LLMClient()
 
 
-def retrieve(question: str, top_k: int = 5) -> list[RetrievedChunk]:
-    """Phase 2's retrieval, wrapped to return the RetrievedChunk type Phase 1 expects."""
+def retrieve(question: str, top_k: int = 5, min_relevance: float = 0.25) -> list[RetrievedChunk]:
+    """
+    Phase 2's retrieval, wrapped to return the RetrievedChunk type Phase 1 expects.
+    
+    min_relevance filters out low-scoring noise chunks before they ever reach the
+    prompt — validated as a real, present problem by Phase 6's RAGAS evaluation,
+    which showed irrelevant chunks (e.g. the golden retriever chunk) being retrieved
+    on every query, ranked correctly but still consuming tokens unnecessarily.
+    """
     results = collection.query(query_texts=[question], n_results=top_k)
     chunks = []
     for doc, meta, dist, doc_id in zip(
         results["documents"][0], results["metadatas"][0], results["distances"][0], results["ids"][0]
     ):
-        chunks.append(RetrievedChunk(text=doc, source=meta.get("source", "unknown"), chunk_id=doc_id, relevance_score=1 - dist))
+        relevance = 1 - dist
+        if relevance >= min_relevance:
+            chunks.append(RetrievedChunk(
+                text=doc, source=meta.get("source", "unknown"),
+                chunk_id=doc_id, relevance_score=relevance
+            ))
     return chunks
-
 
 def answer_question(question: str, top_k: int = 5) -> dict:
     """The complete RAG loop: retrieve -> ground -> generate."""

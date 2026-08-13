@@ -1,0 +1,17 @@
+Meridian Robotics — Product Roadmap Notes
+Internal meeting notes, compiled July 2025
+
+ATLAS-1 WAREHOUSE ROBOT
+The ATLAS-1 autonomous warehouse robot completed its pilot program with three logistics partners in Q2 2025. Average pick accuracy across the pilot was 99.2%, exceeding the 98% target set at the start of the program. Full commercial availability is planned for Q4 2025, with an initial production run of 500 units.
+
+NAVIGATOR SOFTWARE PLATFORM
+The Navigator fleet management platform now supports coordination of up to 200 robots per warehouse site, up from 50 in the previous release. This update also introduces predictive maintenance alerts, which flag hardware issues an average of 11 days before failure based on sensor telemetry patterns.
+
+SCOUT-MINI DELIVERY DRONE
+The Scout-Mini delivery drone remains in early prototype stage. Current flight time is 22 minutes per charge, short of the 40-minute target needed for suburban delivery routes. The engineering team is evaluating three alternative battery chemistries to close this gap, with a decision expected by end of Q3 2025.
+
+PARTNERSHIP DISCUSSIONS
+Preliminary discussions are underway with two regional grocery chains interested in piloting ATLAS-1 for backroom inventory management. No agreements have been signed as of this writing.
+
+HEADCOUNT
+The robotics engineering team grew from 14 to 23 people during the first half of 2025, with most new hires concentrated in the perception and controls groups.

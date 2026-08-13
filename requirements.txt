@@ -11,3 +11,8 @@ langgraph
 ragas==0.3.9  # pinned — 0.4.x has a known import bug, see github.com/vibrantlabsai/ragas/issues/2745
 datasets
 langchain-anthropic
+python-docx
+langchain
+langchain-pinecone
+langchain-huggingface
+pinecone
