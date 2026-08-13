@@ -24,12 +24,21 @@ from core.vector_store import get_vector_store, RetrievedChunk
 from core.llm_client import LLMClient
 from core.prompts import build_grounded_prompt
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
+from core.vector_store import warm_embedding_cache
 from core.session import (
     SESSION_COOKIE_NAME, new_session_id, check_rate_limit,
     record_query, clear_session_usage,
 )
 
-app = FastAPI(title="AI Research Assistant API", version="1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Warming embedding model cache at startup...")
+    warm_embedding_cache()
+    print("Warm-up complete — ready for requests.")
+    yield
+
+app = FastAPI(title="AI Research Assistant API", version="1.0", lifespan=lifespan)
 
 # CORS — allows the Astro portfolio site (different origin) to call this API.
 # Restrict allow_origins to your actual site domain before final deployment.

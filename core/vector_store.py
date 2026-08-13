@@ -11,6 +11,19 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+class PreloadedEmbeddingFunction:
+    """
+    A minimal ChromaDB-compatible embedding function that wraps an ALREADY
+    loaded SentenceTransformer model. Unlike chromadb's built-in
+    SentenceTransformerEmbeddingFunction, this does zero loading of its own —
+    it just calls .encode() on the model it's given.
+    """
+    def __init__(self, model):
+        self._model = model
+
+    def __call__(self, input):
+        return self._model.encode(input).tolist()
+
 
 @dataclass
 class RetrievedChunk:
@@ -35,21 +48,51 @@ class VectorStore(ABC):
     @abstractmethod
     def delete_all(self) -> None:
         """Wipes this session's data — used by the manual /clear endpoint."""
-        ...
+        
+_embedding_fn_cache = {}
+
+def get_chroma_embedding_function():
+    """
+    Constructs chromadb's SentenceTransformerEmbeddingFunction exactly ONCE,
+    cached at module level, then reused for every ChromaVectorStore instance
+    for the lifetime of the process. This is what actually eliminates the
+    reload — not a hand-rolled wrapper class, which broke ChromaDB's internal
+    embedding-function consistency check.
+    """
+    if "default" not in _embedding_fn_cache:
+        from chromadb.utils import embedding_functions
+        _embedding_fn_cache["default"] = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+    return _embedding_fn_cache["default"]
+
+def warm_embedding_cache():
+    """
+    Call once at server startup to eagerly load the embedding model,
+    so the FIRST real request doesn't pay the loading cost.
+    Safe to call multiple times — get_chroma_embedding_function()'s
+    own cache check means this is a no-op after the first call.
+    """
+    backend = os.getenv("VECTOR_STORE", "chroma").lower()
+    if backend == "chroma":
+        get_chroma_embedding_function()
+    # Note: the Pinecone backend loads its embeddings model per-session-instance
+    # (via LangChain's HuggingFaceEmbeddings), a separate code path not yet
+    # warmed here — acceptable for now since Pinecone is the deployed-production
+    # path, not the local dev path this warm-up primarily targets.
 
 
 class ChromaVectorStore(VectorStore):
     def __init__(self, session_id: str, path: str = "./chroma_db"):
         import chromadb
-        from chromadb.utils import embedding_functions
 
-        embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+        embedding_fn = get_chroma_embedding_function()  # always the SAME cached instance
         self.client = chromadb.PersistentClient(path=path)
         self.collection_name = f"session_{safe_session_key(session_id)}"
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name, embedding_function=embedding_fn, metadata={"hnsw:space": "cosine"}
         )
-
+   
     def upsert(self, ids, documents, metadatas):
         self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
 
@@ -117,7 +160,6 @@ class PineconeVectorStore(VectorStore):
 
 
 def get_vector_store(session_id: str) -> VectorStore:
-    """The single switch point. VECTOR_STORE=pinecone in production; unset locally defaults to chroma."""
     backend = os.getenv("VECTOR_STORE", "chroma").lower()
     if backend == "pinecone":
         return PineconeVectorStore(session_id=session_id)
