@@ -18,6 +18,8 @@ from pathlib import Path as PathLib
 from fastapi import FastAPI, UploadFile, File, Request, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import asyncio
+
 
 from core.document_loader import recursive_chunk, load_document, validate_file
 from core.vector_store import get_vector_store, RetrievedChunk
@@ -29,17 +31,53 @@ from core.vector_store import warm_embedding_cache
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from core.session import check_upload_limit, record_upload
+from core.session import get_session_status
+from core.session import get_stale_session_ids, clear_session_usage
+from core.vector_store import get_vector_store
 from core.session import (
     SESSION_COOKIE_NAME, new_session_id, check_rate_limit,
     record_query, clear_session_usage,
 )
+
+CLEANUP_INTERVAL_SECONDS = 20  # sweep once an hour 3600
+
+async def cleanup_stale_sessions():
+    """Runs forever in the background, deleting Pinecone/Chroma data for idle sessions."""
+    while True:
+        await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+        stale_ids = get_stale_session_ids()
+        for session_id in stale_ids:
+            try:
+                store = get_vector_store(session_id)
+                store.delete_all()
+                clear_session_usage(session_id)
+                print(f"Cleaned up stale session: {session_id}")
+            except Exception as e:
+                print(f"Failed to clean up session {session_id}: {e}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Warming embedding model cache at startup...")
     warm_embedding_cache()
     print("Warm-up complete — ready for requests.")
+
+    cleanup_task = asyncio.create_task(cleanup_stale_sessions())  
+
     yield
+
+    cleanup_task.cancel()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Warming embedding model cache at startup...")
+    warm_embedding_cache()
+    print("Warm-up complete — ready for requests.")
+    cleanup_task = asyncio.create_task(cleanup_stale_sessions())
+    print(f"Cleanup task created: {cleanup_task}")
+
+    yield
+    cleanup_task.cancel()
 
 app = FastAPI(title="AI Research Assistant API", version="1.0", lifespan=lifespan)
 
@@ -58,6 +96,12 @@ app.add_middleware(
 
 llm = LLMClient()
 
+@app.get("/session/status")
+def session_status(request: Request):
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    if not session_id:
+        return {"uploaded_files": [], "queries_used": 0, "bytes_uploaded": 0}
+    return get_session_status(session_id)
 
 def get_or_create_session(request: Request, response: Response) -> str:
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
@@ -130,7 +174,7 @@ async def upload_document(request: Request, response: Response, file: UploadFile
             metadatas=[{"source": c.source, "chunk_index": c.chunk_index} for c in chunks],
         )
 
-        record_upload(session_id, real_path.stat().st_size)  # NEW
+        record_upload(session_id, real_path.stat().st_size, filename=file.filename)
 
         return UploadResponse(filename=file.filename, chunks_ingested=len(chunks), status="ok")
 
@@ -157,7 +201,7 @@ def ask_question(payload: AskRequest, request: Request, response: Response):
 
     return AskResponse(
         answer=answer,
-        sources=[f"{c.source} (relevance: {c.relevance_score:.2f})" for c in retrieved],
+        sources=[f"{c.source} — chunk {c.chunk_id} (relevance: {c.relevance_score:.2f})" for c in retrieved],
     )
 
 @app.post("/clear")

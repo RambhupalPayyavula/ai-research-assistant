@@ -104,7 +104,12 @@ class ChromaVectorStore(VectorStore):
         ):
             relevance = 1 - dist
             if relevance >= min_relevance:
-                chunks.append(RetrievedChunk(doc, meta.get("source", "unknown"), doc_id, relevance))
+                chunks.append(RetrievedChunk(
+                    text=doc,
+                    source=meta.get("source", "unknown"),
+                    chunk_id=meta.get("chunk_index", doc_id),   # <-- was doc_id, now uses the clean index
+                    relevance_score=relevance,
+                ))
         return chunks
 
     def delete_all(self):

@@ -79,15 +79,12 @@
 
 <h1>AI Research Assistant</h1>
 <p class="subtitle">Upload a document, then ask questions about it. Answers are grounded only in what you upload — nothing is made up.</p>
-<p style="font-size:0.78rem; color:#888; margin: 4px 0 12px 0;">
-  PDF, DOCX, TXT, or Markdown — max 20MB per file, 50MB total per session
-</p>
 
 <div class="card">
   <h2>1. Upload a document</h2>
   <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.md">
   <p style="font-size:0.78rem; color:#888; margin: 4px 0 12px 0;">
-    PDF, DOCX, TXT, or Markdown — max 20MB per file
+    PDF, DOCX, TXT, or Markdown — max 20MB per file, 50MB total per session
   </p>
   <button onclick="uploadFile()" id="uploadBtn">Upload</button>
   <div class="status" id="uploadStatus"></div>
@@ -113,8 +110,21 @@
 </footer>
 
 <script>
-  const uploadedNames = [];
   const MAX_FILE_SIZE_MB = 20;
+
+window.addEventListener('DOMContentLoaded', async () => {
+try {
+  const res = await fetch('/session/status', { credentials: 'include' });
+  const data = await res.json();
+  if (data.uploaded_files.length) {
+    document.getElementById('uploadedFiles').innerHTML =
+      data.uploaded_files.map(n => `<span>${escapeHtml(n)}</span>`).join("");
+    document.getElementById('uploadStatus').textContent =
+      `Resumed session — ${data.uploaded_files.length} file(s) already uploaded, ${data.queries_used} question(s) asked.`;
+    document.getElementById('uploadStatus').className = "status success";
+  }
+} catch (e) { /* fine if this fails — just means a fresh session */ }
+  });
 
 async function uploadFile() {
   const fileInput = document.getElementById('fileInput');
@@ -142,6 +152,7 @@ async function uploadFile() {
   btn.disabled = true;
   status.textContent = "Uploading and processing... (first request may take a moment)";
   status.className = "status";
+  
 
   try {
     const res = await fetch("/upload", { method: "POST", body: formData, credentials: "include" });
@@ -151,9 +162,10 @@ async function uploadFile() {
 
     status.textContent = `Done — ${data.chunks_ingested} chunks indexed.`;
     status.className = "status success";
-    uploadedNames.push(data.filename);
+    const statusRes = await fetch('/session/status', { credentials: 'include' });
+    const statusData = await statusRes.json();
     document.getElementById('uploadedFiles').innerHTML =
-      uploadedNames.map(n => `<span>${n}</span>`).join("");
+      statusData.uploaded_files.map(n => `<span>${escapeHtml(n)}</span>`).join("");
     fileInput.value = "";
   } catch (err) {
     status.textContent = "Error: " + err.message;
@@ -188,19 +200,20 @@ async function uploadFile() {
 
       document.getElementById('answerText').textContent = data.answer;
       const citedNumbers = extractCitedSourceNumbers(data.answer);
-        const citedSources = citedNumbers.map(n => data.sources[n - 1]).filter(Boolean);
+      const grouped = groupSourcesByFile(citedNumbers, data.sources);
+      // const citedSources = citedNumbers.map(n => data.sources[n - 1]).filter(Boolean);
 
-      const sourcesHtml = citedSources.length
-        ? `Sources: ` + citedSources.map((s, i) => {
-            const filename = escapeHtml(s.split(" (relevance:")[0]);
-            return `[${citedNumbers[i]}] ${filename}`;
-            }).join("&nbsp;&nbsp;")
-            + `<br><a href="#" onclick="toggleDetails(event)" style="font-size:0.78rem;color:#888;">Show all retrieved chunks (${data.sources.length})</a>`
-            + `<div id="retrievalDetails" style="display:none; margin-top:6px; font-family:monospace; font-size:0.78rem; color:#777;">`
+      const sourcesHtml = grouped.size
+        ? `Sources: ` + [...grouped.entries()].map(([filename, nums]) => {
+            const numLabels = nums.map(n => `[${n}]`).join("");
+            return `${numLabels} ${escapeHtml(filename)}`;
+          }).join("&nbsp;&nbsp;&nbsp;")
+          + `<br><a href="#" onclick="toggleDetails(event)" style="font-size:0.78rem;color:#888;">Show all retrieved chunks (${data.sources.length})</a>`
+          + `<div id="retrievalDetails" style="display:none; margin-top:6px; font-family:monospace; font-size:0.78rem; color:#777;">`
             + data.sources.map((s, i) => `[${i + 1}] ${escapeHtml(s)}`).join("<br>")
-            + `</div>`
+          + `</div>`
         : "";
-        document.getElementById('sourcesText').innerHTML = sourcesHtml;
+      document.getElementById('sourcesText').innerHTML = sourcesHtml;
       answerBox.style.display = "block";
       status.textContent = "";
     } catch (err) {
@@ -213,7 +226,6 @@ async function uploadFile() {
 
   async function clearSession() {
     await fetch("/clear", { method: "POST", credentials: "include" });
-    uploadedNames.length = 0;
     document.getElementById('uploadedFiles').innerHTML = "";
     document.getElementById('answerBox').style.display = "none";
     document.getElementById('uploadStatus').textContent = "Session cleared.";
@@ -225,11 +237,23 @@ async function uploadFile() {
     const el = document.getElementById('retrievalDetails');
     el.style.display = el.style.display === 'none' ? 'block' : 'none';
   }
-
   function extractCitedSourceNumbers(answerText) {
-    const matches = [...answerText.matchAll(/\[(\d+)\]/g)];   // was /\[Source (\d+)\]/g
-    return [...new Set(matches.map(m => parseInt(m[1], 10)))];
-    }
+    const matches = [...answerText.matchAll(/\[(\d+)\]/g)];
+    const unique = [...new Set(matches.map(m => parseInt(m[1], 10)))];
+    return unique.sort((a, b) => a - b);   
+  }
+
+  function groupSourcesByFile(citedNumbers, sources) {
+    const groups = new Map();
+    citedNumbers.forEach(n => {
+      const s = sources[n - 1];
+      if (!s) return;
+      const filename = s.split(" (relevance:")[0].split(" — chunk")[0];
+      if (!groups.has(filename)) groups.set(filename, []);
+      groups.get(filename).push(n);
+  });
+  return groups;
+  }
 
   function escapeHtml(str) {
     const div = document.createElement('div');

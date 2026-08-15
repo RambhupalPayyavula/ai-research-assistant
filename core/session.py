@@ -16,13 +16,31 @@ from dataclasses import dataclass, field
 SESSION_COOKIE_NAME = "session_id"
 MAX_REQUESTS_PER_MINUTE = 10
 MAX_QUERIES_PER_SESSION = 30
-
+SESSION_IDLE_TIMEOUT_HOURS = 0.01 #24
 
 @dataclass
 class SessionUsage:
     query_count: int = 0
     request_timestamps: list = field(default_factory=list)
     total_bytes_uploaded: int = 0
+    uploaded_filenames: set = field(default_factory=set)
+    last_active: float = field(default_factory=time.time)
+
+
+def record_upload(session_id: str, file_size_bytes: int, filename: str = None):
+    usage = get_usage(session_id)
+    usage.total_bytes_uploaded += file_size_bytes
+    if filename:
+        usage.uploaded_filenames.add(filename)
+
+
+def get_session_status(session_id: str) -> dict:
+    usage = get_usage(session_id)
+    return {
+        "uploaded_files": sorted(usage.uploaded_filenames),
+        "queries_used": usage.query_count,
+        "bytes_uploaded": usage.total_bytes_uploaded,
+    }
 
 MAX_SESSION_UPLOAD_MB = 50
 _usage_store: dict[str, SessionUsage] = {}
@@ -35,6 +53,7 @@ def new_session_id() -> str:
 def get_usage(session_id: str) -> SessionUsage:
     if session_id not in _usage_store:
         _usage_store[session_id] = SessionUsage()
+    _usage_store[session_id].last_active = time.time()
     return _usage_store[session_id]
 
 
@@ -61,6 +80,11 @@ def record_query(session_id: str):
 def clear_session_usage(session_id: str):
     _usage_store.pop(session_id, None)
 
+def get_stale_session_ids(max_idle_hours: float = SESSION_IDLE_TIMEOUT_HOURS) -> list[str]:
+    """Returns session IDs that haven't been touched in longer than the idle threshold."""
+    cutoff = time.time() - (max_idle_hours * 3600)
+    return [sid for sid, usage in _usage_store.items() if usage.last_active < cutoff]
+
 def check_upload_limit(session_id: str, new_file_size_bytes: int) -> tuple[bool, str]:
     """Checks whether adding this file would exceed the session's cumulative upload cap."""
     usage = get_usage(session_id)
@@ -69,6 +93,3 @@ def check_upload_limit(session_id: str, new_file_size_bytes: int) -> tuple[bool,
         used_mb = usage.total_bytes_uploaded / (1024 * 1024)
         return False, f"Session upload limit reached: {used_mb:.1f}MB used, {MAX_SESSION_UPLOAD_MB}MB max. Clear session to continue."
     return True, ""
-
-def record_upload(session_id: str, file_size_bytes: int):
-    get_usage(session_id).total_bytes_uploaded += file_size_bytes
