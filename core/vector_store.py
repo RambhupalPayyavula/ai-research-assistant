@@ -85,14 +85,13 @@ def warm_embedding_cache():
 class ChromaVectorStore(VectorStore):
     def __init__(self, session_id: str, path: str = "./chroma_db"):
         import chromadb
-
-        embedding_fn = get_chroma_embedding_function()  # always the SAME cached instance
+        embedding_fn = get_chroma_embedding_function()
         self.client = chromadb.PersistentClient(path=path)
         self.collection_name = f"session_{safe_session_key(session_id)}"
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name, embedding_function=embedding_fn, metadata={"hnsw:space": "cosine"}
         )
-   
+
     def upsert(self, ids, documents, metadatas):
         self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
 
@@ -107,14 +106,13 @@ class ChromaVectorStore(VectorStore):
                 chunks.append(RetrievedChunk(
                     text=doc,
                     source=meta.get("source", "unknown"),
-                    chunk_id=meta.get("chunk_index", doc_id),   # <-- was doc_id, now uses the clean index
+                    chunk_id=meta.get("chunk_index", doc_id),
                     relevance_score=relevance,
                 ))
         return chunks
 
     def delete_all(self):
         self.client.delete_collection(self.collection_name)
-
 
 class PineconeVectorStore(VectorStore):
     EMBEDDING_DIM = 384
@@ -154,9 +152,14 @@ class PineconeVectorStore(VectorStore):
         chunks = []
         for doc, score in results:
             if score >= min_relevance:
+                raw_chunk_id = doc.metadata.get("chunk_index", "unknown")
+                try:
+                    chunk_id = int(raw_chunk_id)
+                except (TypeError, ValueError):
+                    chunk_id = raw_chunk_id
                 chunks.append(RetrievedChunk(
                     text=doc.page_content, source=doc.metadata.get("source", "unknown"),
-                    chunk_id=doc.metadata.get("chunk_index", "unknown"), relevance_score=score,
+                    chunk_id=chunk_id, relevance_score=score,
                 ))
         return chunks
 

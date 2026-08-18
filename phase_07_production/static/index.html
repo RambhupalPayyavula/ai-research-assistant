@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Research Assistant</title>
+<title>AI Research Assistant — by Rambhupal Payyavula</title>
+<meta name="description" content="An agentic RAG system built by Rambhupal Payyavula, using Claude, LangChain, LangGraph, and Pinecone.">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -79,6 +80,9 @@
 
 <h1>AI Research Assistant</h1>
 <p class="subtitle">Upload a document, then ask questions about it. Answers are grounded only in what you upload — nothing is made up.</p>
+<p style="font-size:0.85rem; color:#888; margin: -20px 0 24px 0;">
+  Built by <a href="https://rambhupalpayyavula.com" target="_blank" style="color:#666;">Rambhupal Payyavula</a>
+</p>
 
 <div class="card">
   <h2>1. Upload a document</h2>
@@ -105,8 +109,9 @@
 <button class="secondary" onclick="clearSession()">Clear my documents</button>
 
 <footer>
-  Built with Claude, LangChain, Pinecone, and FastAPI &middot;
-  <a href="https://github.com/RambhupalPayyavula/ai-research-assistant" target="_blank">View source on GitHub</a>
+  Built by <a href="https://rambhupalpayyavula.com" target="_blank">Rambhupal Payyavula</a>
+  &middot; Claude, LangChain, LangGraph, Pinecone, FastAPI, Docker
+  &middot; <a href="https://github.com/RambhupalPayyavula/ai-research-assistant" target="_blank">Source on GitHub</a>
 </footer>
 
 <script>
@@ -199,15 +204,44 @@ async function uploadFile() {
       if (!res.ok) throw new Error(data.detail || "Request failed");
 
       document.getElementById('answerText').textContent = data.answer;
-      const citedNumbers = extractCitedSourceNumbers(data.answer);
-      const grouped = groupSourcesByFile(citedNumbers, data.sources);
-      // const citedSources = citedNumbers.map(n => data.sources[n - 1]).filter(Boolean);
+      const citedNumbers = extractCitedSourceNumbers(data.answer);  // e.g. [1, 3]
+
+      // Build old -> new sequential mapping: {1: 1, 3: 2}
+      const renumberMap = {};
+      citedNumbers.forEach((oldNum, i) => {
+        renumberMap[oldNum] = i + 1;
+      });
+
+      // Rewrite the answer text's citation markers to the new sequential numbers
+      const renumberedAnswer = data.answer.replace(/\[(\d+)\]/g, (match, num) => {
+        const mapped = renumberMap[parseInt(num, 10)];
+        return mapped ? `[${mapped}]` : match;   // leaves untouched if somehow not in the cited set
+      });
+
+      document.getElementById('answerText').textContent = renumberedAnswer;
+
+      // Group sources using the NEW sequential numbers instead of the old ones
+      const grouped = new Map(); // filename -> [new sequential numbers]
+      citedNumbers.forEach(oldNum => {
+        const s = data.sources[oldNum - 1];
+        if (!s) return;
+        const filename = s.split(" (relevance:")[0].split(" — chunk")[0];
+        const newNum = renumberMap[oldNum];
+        if (!grouped.has(filename)) grouped.set(filename, []);
+        grouped.get(filename).push(newNum);
+      });
+
+      const totalCitedNums = citedNumbers.length;
+      const unusedCount = data.sources.length - totalCitedNums;
 
       const sourcesHtml = grouped.size
         ? `Sources: ` + [...grouped.entries()].map(([filename, nums]) => {
-            const numLabels = nums.map(n => `[${n}]`).join("");
+            const numLabels = nums.sort((a, b) => a - b).map(n => `[${n}]`).join("");
             return `${numLabels} ${escapeHtml(filename)}`;
           }).join("&nbsp;&nbsp;&nbsp;")
+          + (unusedCount > 0
+              ? `<br><span style="font-size:0.75rem;color:#999;">${unusedCount} additional chunk(s) retrieved but not cited in this answer</span>`
+              : "")
           + `<br><a href="#" onclick="toggleDetails(event)" style="font-size:0.78rem;color:#888;">Show all retrieved chunks (${data.sources.length})</a>`
           + `<div id="retrievalDetails" style="display:none; margin-top:6px; font-family:monospace; font-size:0.78rem; color:#777;">`
             + data.sources.map((s, i) => `[${i + 1}] ${escapeHtml(s)}`).join("<br>")

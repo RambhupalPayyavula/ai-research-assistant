@@ -39,7 +39,7 @@ from core.session import (
     record_query, clear_session_usage,
 )
 
-CLEANUP_INTERVAL_SECONDS = 20  # sweep once an hour 3600
+CLEANUP_INTERVAL_SECONDS = 3600  # sweep once an hour 
 
 async def cleanup_stale_sessions():
     """Runs forever in the background, deleting Pinecone/Chroma data for idle sessions."""
